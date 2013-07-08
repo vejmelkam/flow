@@ -11,3 +11,6 @@ BEAMFILES = ebin/fmon.beam \
 build:
 	rm -f ebin/*.beam
 	cd src && joxa -o ../ebin -c *.jxa
+
+build-test:
+	cd test && joxa -p ../ebin -o ../ebin -c *.jxa
