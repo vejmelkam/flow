@@ -1,0 +1,13 @@
+(ns tasks-fsys
+    (require (file :joxify)
+	     (lists :joxify)
+	     (string :joxify :as str)
+	     (filelib :joxify :as flib))
+    (use (flow-utils :only (fmt-error/2 fmt-success/2))))
+
+
+(defn+ create-dir (dir)
+  (case (file/make-dir dir)
+	(:ok              (fmt-success "directory [~s] created" dir))
+	({:error :eexist} (fmt-success "directory [~s] already exists" dir))
+	({:error reason}  (fmt-error "failed to create-dir [~s] with error ~p" dir reason))))

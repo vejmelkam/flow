@@ -1,0 +1,115 @@
+(ns task-exec
+    (require file
+	     lists
+	     string
+	     os
+	     io
+	     filename)
+    (use (erlang :only (send/2 self/0 spawn/1 open_port/2 ==/2))
+         (io_lib :only (format/2))
+	 (flow-utils :only (fmt-error/2 fmt-success/2 read-int-from-file/1 wait-for-file/3))))
+
+
+
+;; hack: "defines" are written as a functions with no args
+(defn file-wait-chunk-ms () 500)
+(defn run-script-template () (string/join 
+["#!/usr/bin/env bash" "CMD=~p" "TID=~p" "SOUT=\"$TID.stdout\"" "SERR=\"$TID.stderr\""
+ "PIDFILE=\"$TID.pid\"" "DONEFILE=\"$TID.exitcode\"" "touch $SOUT" "touch $SERR" 
+ "$CMD 2>> $SERR 1>> $SOUT &" "PID=$!" "echo $PID > $PIDFILE" "wait $PID" "echo $? > $DONEFILE"] "\n"))
+
+
+;; read an integer from a process file (suffix is either .pid or .exitcode)
+(defn read-int-proc-file (in-dir tid suffix)
+  (read-int-from-file (filename/join in-dir (lists/append tid suffix))))
+
+
+;; construct and write the BASH run script which executes the file
+(defn make-run-script (cmd tid target-file)
+  (file/write_file target-file (format (run-script-template) [cmd tid]))
+  ;; 448_10 = 700 in octal
+  (file/change_mode target-file 448))
+
+
+;; retrieve the file-name of a stream (either :stdout or :stderr)
+(defn+ get-stream (pid stream)
+  (send pid {:get-stream (self) stream})
+  (receive
+   ({pid file-name} file-name)))
+
+
+;; monitors the process execution, retrieving the os pid when available
+;; and waiting for the exit code
+(defn monitor-process (in-dir tid os-pid)
+  (receive
+   (:kill-9
+    (os/cmd (format "kill -9 ~p" os-pid))
+    (monitor-process in-dir tid os-pid))
+   ;; the process exited, capture status
+   ({:exited {:success exit-code-file}}
+    (let* (exit-code (read-int-from-file exit-code-file))
+      (fmt-success "~s: exited with code ~p" tid exit-code)))
+   ({:exited {:failure reason}}
+      (fmt-error "~s: failed with reason ~p" tid reason))
+   ({:have-pid {:failure :timeout}}
+    (fmt-error "~s: pid not acquired within timeout~n" tid))
+   ;; the pid file was created
+   ({:have-pid {:success pid-file}}
+    (let* (os-pid-2 (read-int-from-file pid-file))
+      (monitor-process in-dir tid os-pid-2)))
+   ;; we don't understand this message, notify
+   (unknown-msg
+    (io/format "~s: message not understood [~p]~n" [tid unknown-msg])
+    (monitor-process in-dir tid os-pid))))
+
+
+(defn do-execute (tid command in-dir exec-timeout)
+  ;; construct run script and run it
+  (let* (fqn (filename/join in-dir "run.sh"))
+    (make-run-script command tid fqn)
+    (let* (port-id (open_port {:spawn fqn} [{:cd in-dir}])
+	   myself  (self)
+	   pid-file (lists/flatten [in-dir "/" tid ".pid"])
+	   stderr-name (filename/join in-dir (lists/append tid ".stderr"))
+	   stdout-name (filename/join in-dir (lists/append tid ".stdout"))
+	   exit-code-file (filename/join in-dir (lists/append tid ".exitcode")))
+      ;; spawn a process that waits for the pid and exit code files to appear
+      ;; with given timeouts
+      (let* (pid (spawn (fn () (send myself {:task-done (self) (monitor-process in-dir tid :undefined)}))))
+	(spawn (fn () (send pid {:exited (wait-for-file exit-code-file exec-timeout 500)})))
+	(spawn (fn () (send pid {:have-pid (wait-for-file pid-file 5000 500)})))
+	{:pid pid stdout-name stderr-name exit-code-file}))))
+
+
+;; execute a process denoted tid with a given timeout in a given directory
+;; the execute function either returns {:success exit-code} if process need not
+;; be executed or {:pid pid stdout-name stderr-name} if the process was executed and running
+;; in this case, the process termination is transmitted to the caller as
+;; {:task-done task-pid {result message}} where result is either :success or :failure
+(defn+ execute (tid command in-dir exec-timeout)
+  ;; check if the command has already been run (exitcode file exists)
+  (let* (exit-code (read-int-proc-file in-dir tid ".exitcode")
+	 stderr-name (filename/join in-dir (lists/append tid ".stderr"))
+	 stdout-name (filename/join in-dir (lists/append tid ".stdout"))
+	 exit-code-file (filename/join in-dir (lists/append tid ".exitcode")))
+    (case (== exit-code :invalid)
+	  (:true
+	   (let* (os-pid (read-int-proc-file in-dir tid ".pid"))
+	     (case (== os-pid :invalid)
+		   (:true (do-execute tid command in-dir exec-timeout))
+		   (:false
+		    (let* (myself (self)
+			   pid (spawn (fn () (send myself {:task-done (self) (monitor-process in-dir tid os-pid)}))))
+		      ;; we only spawn the exit watcher
+		      (spawn (fn () (send pid {:exited (wait-for-file exit-code-file exec-timeout 500)})))
+		      {:pid pid stdout-name stderr-name exit-code-file})))))
+	  ;; just return the exit code we already obtained
+	  (:false {:success {exit-code stdout-name stderr-name exit-code-file}}))))
+
+
+;; simplest wait-for-completion stub, which just returns result
+;; of the :task-done message
+;; more sophisticated clients should handle this message themselves
+(defn+ wait-for-completion (pid)
+  (receive
+   ({:task-done pid result} result)))

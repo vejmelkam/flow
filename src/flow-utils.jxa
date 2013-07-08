@@ -1,0 +1,61 @@
+(ns flow-utils
+    (require file
+	     filelib
+	     lists
+	     timer
+	     io_lib
+	     (erlang :as erl)
+	     (string :as str)))
+
+;; format a task error tuple
+;; str and args are passed to a io_lib/format call
+(defn+ fmt-error (str &rest args)
+  {:failure (lists/flatten (io_lib/format str args))})
+
+;; format a task success tuple
+;; str and args are passed to a io_lib/format call
+(defn+ fmt-success (str &rest args)
+  {:success (lists/flatten (io_lib/format str args))})
+
+;; opens file file-name with mode mode and
+;; passes the device to func/1
+;; after function is executed, the device is closed
+;; TODO: try/catch block should be added
+(defn+ with-file (file-name mode func)
+  (case (file/open file-name mode)
+	({:ok device}
+	 (let* (res (func device))
+	   (file/close device)
+	   {:success res}))
+	({:error reason} {:failure reason})))
+
+
+;; keep waiting for a file to appear for a defined time
+;; this code checks every file-wait-chunk-ms milliseconds whether
+;; the file has appeared
+(defn+ wait-for-file (file-name timeout file-wait-chunk-ms)
+  (case (erl/> timeout 0)
+        (:true
+	 (case (filelib/is_file file-name)
+	       (:true {:success file-name})
+	       (:false (timer/sleep file-wait-chunk-ms)
+		       (wait-for-file file-name (erl/- timeout file-wait-chunk-ms) file-wait-chunk-ms))))
+	(:false
+	 {:failure :timeout})))
+
+
+
+;; read in a file that contains a single integer
+;; return the integer or :invalid if the file was unreadable for any reason
+(defn+ read-int-from-file (fqn)
+    (case (file/read_file fqn)
+	  ({:ok data} 
+	   (let* (stripped (str/strip (erl/binary_to_list data) :right 10))
+	     (erl/list_to_integer stripped)))
+	  ({:error reason} 
+	   :invalid)))
+
+
+;; sends a message to multiple targets
+(defn+ multicast (msg targets)
+  (lists/foreach (fn (tgt) (erl/send tgt msg)) targets))
