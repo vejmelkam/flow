@@ -11,15 +11,15 @@
 ;; when this drops to one it's just us, the file won't grow anymore
 ;; then file-in-use-check returns :false, otherwise it returns :true
 ;; NOTE: this may be a problem if the writing process is not on this machine, can fuser detect the write?
+;;
+;; when monitoring output files of running processes, an alternate method is used: when .exitcode file appears, the process is done
+;; writing to stdout/stderr files
 (defn+ file-in-use-check (file-name)
   (let* (output (os/cmd (lists/append "fuser " file-name))
 	 sc-pos (string/chr output 58) ;; $: = 58
 	 numbers (string/sub_string output (+ sc-pos 2))
 	 proc-count (length (string/tokens numbers " ")))
     (== proc-count 1)))
-
-;; IDEA: somehow route the appearance of an .exitcode file into the file monitor as an external event
-;; that causes the file monitor to stop monitoring
 
 ;; monitors the open device for new lines, which are sent to a list of processes
 (defn monitor-device (master-pid file-name dev timeout-ms retries-past-close done-func targets)
@@ -40,6 +40,9 @@
 	({:error reason} (send master-pid {:failure reason}))))
 
 
+;; monitor the file file-name while checking whether writing to the file is considered done
+;; using done-func and transmitting lines/eof messages to all targets
+;; when the file is closed, the monitor exits by itself
 (defn+ monitor-file (file-name done-func targets)
   ;; wait max 4 seconds for the file to appear (basically only filesystem delay)
   (wait-for-file file-name 4000 200)
