@@ -1,27 +1,43 @@
 (ns task-exec-tester
     (require io
-	     filelib)
+	     filelib
+	     file
+	     flow-log
+	     (joxa-core :as core))
     (use (fmon :only (monitor-file/3))
-	 (task-exec :only (execute/4 wait-for-completion/1))
+	 (task-exec :only (execute/5 wait-for-completion/1))
 	 (erlang :only (spawn/1))))
 
 
-(defn+ test-logger ()
+(defn+ test-monitor-consumer ()
   (receive
-   ({:line line} (io/format "line: ~s" [line]) (test-logger))
+   ({:line line} (io/format "line: ~s" [line]) (test-monitor-consumer))
    (:eof (io/format "eof reached~n"))))
 
 
+(defn spawn-consumer ()
+  (spawn (fn () (test-monitor-consumer))))
+
+
+(defn init-logging ()
+  (core/let ({:ok dev} (file/open "task-exec-log.info" [:write]))
+      (flow-log/start-log "syslog" [{:stdio 0} {:device dev 0}])))
+  
+
+
 (defn+ test ()
-  (case (execute "sleep-task" "./lsw.sh" "/home/martin/Temp" 4000)
-	({:success {exit-code stdout-f stderr-f ec-file}} (io/format "obtained exit code ~p stdout is ~p~n" [exit-code stdout-f])
-	 (case (monitor-file stdout-f (fn () :true) [(spawn (fn () (test-logger)))])
-	       ({:pid m-pid} (io/format "monitor pid is ~p~n" [m-pid]))
-	       ({:failure reason} (io/format "failed to monitor file with reason ~p~n" [reason])))
-	 (io/format "finished with exit code ~p~n" [exit-code]))
-	({:pid pid stdout-file stderr-file ec-file}
-	 (io/format "process is running with pid ~p~n" [pid])
-	 (case (monitor-file stdout-file (fn () (filelib/is_file ec-file)) [(spawn (fn () (test-logger)))])
-	       ({:pid m-pid} (io/format "monitor pid is ~p~n" [m-pid]))
-	       ({:failure reason} (io/format "failed to monitor file with reason ~p~n" [reason])))
-	 (io/format "process completed with result ~p~n" [(wait-for-completion pid)]))))
+  (let* (log-pid (init-logging))
+      (case (execute "sleep-task" "./lsw.sh" "/home/martin/Temp" 4000 log-pid)
+	    ({:success {exit-code stdout-f stderr-f ec-file}}
+	     (io/format "obtained exit code ~p stdout is ~p~n" [exit-code stdout-f])
+	     (case (monitor-file stdout-f (fn () :true) [(spawn-consumer)])
+		   ({:pid m-pid} (io/format "monitor pid is ~p~n" [m-pid]))
+		   ({:failure reason} (io/format "failed to monitor file with reason ~p~n" [reason])))
+	     (io/format "finished with exit code ~p~n" [exit-code]))
+	    ({:pid pid stdout-file stderr-file ec-file}
+	     (io/format "process is running with pid ~p~n" [pid])
+	     (case (monitor-file stdout-file (fn () (filelib/is_file ec-file)) [(spawn-consumer)])
+		   ({:pid m-pid} (io/format "monitor pid is ~p~n" [m-pid]))
+		   ({:failure reason} (io/format "failed to monitor file with reason ~p~n" [reason])))
+	     (io/format "process completed with result ~p~n" [(wait-for-completion pid)])))
+      (flow-log/stop-log log-pid)))

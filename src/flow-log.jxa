@@ -1,0 +1,99 @@
+(ns flow-log
+    (require io 
+	     file
+	     (erlang :as erl)
+	     (joxa-core :as core)
+	     (calendar :joxify)
+	     (io_lib :as iol)))
+
+
+(defmacro define+ (name value)
+  `(defmacro+ ~name () ~value))
+
+;;define standard text levels
+(define+ INFO 0)
+(define+ WARN 1)
+(define+ ERROR 2)
+(define+ FLASH 3)
+
+;; send a message to the log with a given level
+(defn+ log-msg (pid level msg &rest args)
+  (erl/send pid {:msg level (iol/format msg args)})
+  :ok)
+
+;;(defmacro log-func-name (level)
+;; `(defn+ ~log-func-name (pid msg &rest args)
+;;     (erl/send pid {msg ~level (iol/format msg args)})))
+
+(defn+ log-info (pid msg &rest args)
+  (erl/send pid {:msg (INFO) (iol/format msg args)})
+  :ok)
+
+(defn+ log-warn (pid msg &rest args)
+  (erl/send pid {:msg (WARN) (iol/format msg args)})
+  :ok)
+
+(defn+ log-error (pid msg &rest args)
+  (erl/send pid {:msg (ERROR) (iol/format msg args)})
+  :ok)
+
+(defn+ log-flash (pid msg &rest args)
+  (erl/send pid {:msg (FLASH) (iol/format msg args)})
+  :ok)
+
+
+;; send a close request
+(defn+ stop-log (pid)
+  (erl/send pid :eof))
+
+;; construct a logging timestamp
+(defn timestamp ()
+  (core/let ({{yr, mon, day}, {hr, min, sec}} (calendar/local-time))
+	    (iol/format "~4..0B~2..0B~2..0B:~2..0B~2..0B~2..0B"
+		    [yr mon day hr min sec])))
+
+
+;; relay message to all targets
+(defn route-message (tgt msg-level text)
+  (case tgt
+	({:stdio level}
+	 (core/when (core/gte msg-level level) 
+		    (io/format text)))
+	({:device dev level} 
+	 (core/when (core/gte msg-level level)
+		    (io/format dev text [])))
+	({:relay pid level}
+	 (core/when (core/gte msg-level level)
+		    (erl/send pid {:msg text})))))
+
+
+;; relay the eof message to all targets
+(defn send-eof (tgt close-msg)
+  (case tgt
+	({:stdio _level}      (io/format close-msg))
+	({:device dev _level} (io/format dev close-msg []) (file/close dev))
+	({:relay pid _level}  (erl/send pid :eof))))
+
+
+;; the main logging loop which waits for messages in the form
+;; {:msg text} send the text to all targets
+;; :eof stop the logging loop and notify all targets of the close
+;; NOTE: on :eof all files are closed
+(defn log-loop (log-n targets)
+  (receive
+   ; log a new message at the given level
+   ({:msg level text}
+    (let* (log-text [log-n " [" (timestamp) "] -> " text "\n"])
+      (lists/map (fn (tgt) (route-message tgt level log-text)) targets)
+      (log-loop log-n targets)))
+   (:eof
+    (lists/map (fn (tgt) (send-eof tgt [log-n " [" (timestamp) "] -> *** LOG END ***.\n"])) targets))
+   (:exit
+    :ok)))
+
+
+;; start the logging system with given targets
+(defn+ start-log (log-n targets)
+  (erl/spawn (fn () (log-loop log-n targets))))
+
+
