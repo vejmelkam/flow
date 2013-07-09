@@ -5,7 +5,8 @@
 	     timer
 	     io_lib
 	     (erlang :as erl)
-	     (string :as str)))
+	     (string :as str)
+	     joxa-core))
 
 ;; format a task error tuple
 ;; str and args are passed to a io_lib/format call
@@ -59,3 +60,16 @@
 ;; sends a message to multiple targets
 (defn+ multicast (msg targets)
   (lists/foreach (fn (tgt) (erl/send tgt msg)) targets))
+
+
+;; use of this macro requires the namespace erlang is required
+(defmacro+ async-send-me (task)
+  (let* (myself (joxa-core/gensym))
+    `(let* (~myself (erlang/self))
+       (spawn (fn () (erlang/send ~myself ~task))))))
+
+
+;; execute the task in a separate process and send result
+;; to given target process
+(defmacro+ async-send-to (tgt task)
+  `(spawn (fn () (erlang/send ~tgt ~task))))

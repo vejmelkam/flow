@@ -7,21 +7,29 @@
 	     filename)
     (use (erlang :only (send/2 self/0 spawn/1 open_port/2 ==/2))
          (io_lib :only (format/2))
-	 (flow-utils :only (fmt-error/2 fmt-success/2 read-int-from-file/1 wait-for-file/3))))
-
+	 (flow-utils :only (fmt-error/2 fmt-success/2 read-int-from-file/1
+			    wait-for-file/3 async-send-me/1 async-send-to/2))
+	 (joxa-core :only (let/2 define/2))))
 
 
 ;; hack: "defines" are written as a functions with no args
-(defn file-wait-chunk-ms () 500)
 (defn run-script-template () (string/join 
 ["#!/usr/bin/env bash" "CMD=~p" "TID=~p" "SOUT=\"$TID.stdout\"" "SERR=\"$TID.stderr\""
  "PIDFILE=\"$TID.pid\"" "DONEFILE=\"$TID.exitcode\"" "touch $SOUT" "touch $SERR" 
  "$CMD 2>> $SERR 1>> $SOUT &" "PID=$!" "echo $PID > $PIDFILE" "wait $PID" "echo $? > $DONEFILE"] "\n"))
 
 
-;; read an integer from a process file (suffix is either .pid or .exitcode)
-(defn read-int-proc-file (in-dir tid suffix)
-  (read-int-from-file (filename/join in-dir (lists/append tid suffix))))
+;; construct the name of a process output file from
+;; run directory, task name and suffix
+(defn make-proc-name (in-dir tid suffix)
+  (filename/join in-dir (lists/append tid suffix)))
+
+
+;; construct the standard quartet of output filenames of the
+;; stdout, stderr pid and exitcode files
+(defn+ make-proc-names (in-dir tid)
+  (lists/map (fn (suffix) (filename/join in-dir (lists/append tid suffix)))
+	     [".stdout" ".stderr" ".pid" ".exitcode"]))
 
 
 ;; construct and write the BASH run script which executes the file
@@ -29,13 +37,6 @@
   (file/write_file target-file (format (run-script-template) [cmd tid]))
   ;; 448_10 = 700 in octal
   (file/change_mode target-file 448))
-
-
-;; retrieve the file-name of a stream (either :stdout or :stderr)
-(defn+ get-stream (pid stream)
-  (send pid {:get-stream (self) stream})
-  (receive
-   ({pid file-name} file-name)))
 
 
 ;; monitors the process execution, retrieving the os pid when available
@@ -50,13 +51,16 @@
     (let* (exit-code (read-int-from-file exit-code-file))
       (fmt-success "~s: exited with code ~p" tid exit-code)))
    ({:exited {:failure reason}}
-      (fmt-error "~s: failed with reason ~p" tid reason))
+    ; kill the rogue process
+    (os/cmd (format "kill -9 ~p" os-pid))
+    (fmt-error "~s: failed with reason ~p, process ~p killed" tid reason os-pid))
    ({:have-pid {:failure :timeout}}
     (fmt-error "~s: pid not acquired within timeout~n" tid))
    ;; the pid file was created
    ({:have-pid {:success pid-file}}
-    (let* (os-pid-2 (read-int-from-file pid-file))
-      (monitor-process in-dir tid os-pid-2)))
+    (case (read-int-from-file pid-file)
+	  (:invalid (fmt-error "~s: unable to obtain pid from file ~s" tid pid-file))
+	  (os-pid-2 (monitor-process in-dir tid os-pid-2))))
    ;; we don't understand this message, notify
    (unknown-msg
     (io/format "~s: message not understood [~p]~n" [tid unknown-msg])
@@ -64,21 +68,19 @@
 
 
 (defn do-execute (tid command in-dir exec-timeout)
-  ;; construct run script and run it
-  (let* (fqn (filename/join in-dir "run.sh"))
+  (let (fqn (make-proc-name in-dir tid ".sh")
+       [stdout-n stderr-n pid-n exit-code-n] (make-proc-names in-dir tid))
+    ;; construct run.sh shell script
     (make-run-script command tid fqn)
     (let* (port-id (open_port {:spawn fqn} [{:cd in-dir}])
-	   myself  (self)
-	   pid-file (lists/flatten [in-dir "/" tid ".pid"])
-	   stderr-name (filename/join in-dir (lists/append tid ".stderr"))
-	   stdout-name (filename/join in-dir (lists/append tid ".stdout"))
-	   exit-code-file (filename/join in-dir (lists/append tid ".exitcode")))
+	   myself  (self))
       ;; spawn a process that waits for the pid and exit code files to appear
       ;; with given timeouts
       (let* (pid (spawn (fn () (send myself {:task-done (self) (monitor-process in-dir tid :undefined)}))))
-	(spawn (fn () (send pid {:exited (wait-for-file exit-code-file exec-timeout 500)})))
-	(spawn (fn () (send pid {:have-pid (wait-for-file pid-file 5000 500)})))
-	{:pid pid stdout-name stderr-name exit-code-file}))))
+	;; construct watchers in separate threads
+	(async-send-to pid {:exited (wait-for-file exit-code-n exec-timeout 500)})
+	(async-send-to pid {:have-pid (wait-for-file pid-n 5000 500)})
+	{:pid pid stdout-n stderr-n exit-code-n}))))
 
 
 ;; execute a process denoted tid with a given timeout in a given directory
@@ -88,23 +90,19 @@
 ;; {:task-done task-pid {result message}} where result is either :success or :failure
 (defn+ execute (tid command in-dir exec-timeout)
   ;; check if the command has already been run (exitcode file exists)
-  (let* (exit-code (read-int-proc-file in-dir tid ".exitcode")
-	 stderr-name (filename/join in-dir (lists/append tid ".stderr"))
-	 stdout-name (filename/join in-dir (lists/append tid ".stdout"))
-	 exit-code-file (filename/join in-dir (lists/append tid ".exitcode")))
-    (case (== exit-code :invalid)
-	  (:true
-	   (let* (os-pid (read-int-proc-file in-dir tid ".pid"))
-	     (case (== os-pid :invalid)
-		   (:true (do-execute tid command in-dir exec-timeout))
-		   (:false
-		    (let* (myself (self)
-			   pid (spawn (fn () (send myself {:task-done (self) (monitor-process in-dir tid os-pid)}))))
-		      ;; we only spawn the exit watcher
-		      (spawn (fn () (send pid {:exited (wait-for-file exit-code-file exec-timeout 500)})))
-		      {:pid pid stdout-name stderr-name exit-code-file})))))
-	  ;; just return the exit code we already obtained
-	  (:false {:success {exit-code stdout-name stderr-name exit-code-file}}))))
+  (let ([stdout-n stderr-n pid-n exit-code-n] (make-proc-names in-dir tid))
+    (case (read-int-from-file exit-code-n)
+	  (:invalid 
+	   (case (read-int-from-file pid-n)
+		 (:invalid (do-execute tid command in-dir exec-timeout))
+		 (os-pid
+		  (let* (pid (async-send-me {:task-done (self) (monitor-process in-dir tid os-pid)}))
+		    ;; we only spawn the exit watcher
+		    (async-send-to pid {:exited (wait-for-file exit-code-n exec-timeout 500)})
+		    {:pid pid stdout-n stderr-n exit-code-n}))))
+	  (exit-code
+	   ;; just return the exit code we already obtained
+	   {:success {exit-code stdout-n stderr-n exit-code-n}}))))
 
 
 ;; simplest wait-for-completion stub, which just returns result
