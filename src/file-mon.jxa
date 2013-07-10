@@ -1,4 +1,4 @@
-(ns fmon
+(ns file-mon
     (require file timer io os lists string)
     (use (erlang :only (send/2 spawn/1 self/0 length/1 ==/2))
 	 (joxa-core :only (-/1 +/1 and/1))
