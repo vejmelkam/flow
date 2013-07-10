@@ -70,10 +70,10 @@
 (defmacro+ async-send-me (task)
   (let* (myself (joxa-core/gensym))
     `(let* (~myself (erlang/self))
-       (spawn (fn () (erlang/send ~myself ~task))))))
+       (erlang/spawn (fn () (erlang/send ~myself ~task))))))
 
 
 ;; execute the task in a separate process and send result
 ;; to given target process
 (defmacro+ async-send-to (tgt task)
-  `(spawn (fn () (erlang/send ~tgt ~task))))
+  `(erlang/spawn (fn () (erlang/send ~tgt ~task))))
