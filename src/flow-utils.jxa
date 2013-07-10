@@ -8,6 +8,10 @@
 	     (string :as str)
 	     joxa-core))
 
+;; a define+ macro that exports the defined name
+(defmacro+ define+ (name value)
+  `(defmacro+ ~name () ~value))
+
 ;; format a task error tuple
 ;; str and args are passed to a io_lib/format call
 (defn+ fmt-error (str &rest args)

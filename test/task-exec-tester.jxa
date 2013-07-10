@@ -5,14 +5,15 @@
 	     flow-log
 	     (joxa-core :as core))
     (use (fmon :only (monitor-file/3))
-	 (task-exec :only (execute/5 wait-for-completion/1))
+	 (task-exec :only (execute/6 wait-for-completion/1 make-std-output-spec/2
+			   get-output-file/2))
 	 (erlang :only (spawn/1))))
 
 
 (defn+ test-monitor-consumer ()
   (receive
-   ({:line line} (io/format "line: ~s" [line]) (test-monitor-consumer))
-   (:eof (io/format "eof reached~n"))))
+   ({:line line} (io/format "monitor -> ~s" [line]) (test-monitor-consumer))
+   (:eof (io/format "monitor -> eof reached~n"))))
 
 
 (defn spawn-consumer ()
@@ -21,22 +22,25 @@
 
 (defn init-logging ()
   (core/let ({:ok dev} (file/open "task-exec-log.info" [:write]))
-      (flow-log/start-log "syslog" [{:stdio 0} {:device dev 0}])))
+      (flow-log/start-log "syslog" [{:stdio (flow-log/INFO)} {:device dev (flow-log/WARN)}])))
   
 
 
 (defn+ test ()
-  (let* (log-pid (init-logging))
-      (case (execute "sleep-task" "./lsw.sh" "/home/martin/Temp" 4000 log-pid)
-	    ({:success {exit-code stdout-f stderr-f ec-file}}
-	     (io/format "obtained exit code ~p stdout is ~p~n" [exit-code stdout-f])
-	     (case (monitor-file stdout-f (fn () :true) [(spawn-consumer)])
-		   ({:pid m-pid} (io/format "monitor pid is ~p~n" [m-pid]))
-		   ({:failure reason} (io/format "failed to monitor file with reason ~p~n" [reason])))
-	     (io/format "finished with exit code ~p~n" [exit-code]))
-	    ({:pid pid stdout-file stderr-file ec-file}
+  (let* (log-pid (init-logging)
+	 in-dir "/home/martin/Temp"
+	 tid "sleep-task"
+	 out-spec (make-std-output-spec in-dir tid))
+      (case (execute tid "./lsw.sh" out-spec in-dir 11000 log-pid)
+	    ({:success exit-code}
+	     (io/format "tester: have exit code ~p~n" [exit-code])
+	     (case (monitor-file (get-output-file 1 out-spec) (fn () :true) [(spawn-consumer)])
+		   ({:pid pid} :ok)
+		   ({:failure reason} (io/format "failed to monitor file with reason ~p~n" [reason]))))
+	    ({:running {pid exit-code-f}}
 	     (io/format "process is running with pid ~p~n" [pid])
-	     (case (monitor-file stdout-file (fn () (filelib/is_file ec-file)) [(spawn-consumer)])
+	     (case (monitor-file (get-output-file 1 out-spec)
+				 (fn () (filelib/is_file exit-code-f)) [(spawn-consumer)])
 		   ({:pid m-pid} (io/format "monitor pid is ~p~n" [m-pid]))
 		   ({:failure reason} (io/format "failed to monitor file with reason ~p~n" [reason])))
 	     (io/format "process completed with result ~p~n" [(wait-for-completion pid)])))
