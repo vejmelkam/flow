@@ -4,7 +4,7 @@
 	     file
 	     flow-log
 	     (joxa-core :as core))
-    (use (fmon :only (monitor-file/3))
+    (use (file-mon :only (monitor-file/3))
 	 (task-exec :only (execute/6 wait-for-completion/1 make-std-output-spec/2
 			   get-output-file/2))
 	 (erlang :only (spawn/1))))
