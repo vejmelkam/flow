@@ -36,19 +36,6 @@
 	({:error reason} {:failure reason})))
 
 
-;; keep waiting for a file to appear for a defined time
-;; or infinitely (it timeout is :infinite)
-;; this code checks every file-wait-chunk-ms milliseconds whether
-;; the file has appeared
-(defn+ wait-for-file (file-name timeout file-wait-chunk-ms)
-  (if (or (erl/== timeout :infinite) (erl/> timeout 0))
-      (if (filelib/is_file file-name)
-	  {:success file-name}
-	  (do (timer/sleep file-wait-chunk-ms)
-	   (wait-for-file file-name (erl/- timeout file-wait-chunk-ms) file-wait-chunk-ms)))
-      {:failure :timeout}))
-
-
 ;; read in a file that contains a single integer
 ;; return the integer or :invalid if the file was unreadable for any reason
 (defn+ read-int-from-file (fqn)
@@ -76,3 +63,16 @@
 ;; to given target process
 (defmacro+ async-send-to (tgt task)
   `(erlang/spawn (fn () (erlang/send ~tgt ~task))))
+
+
+;; keep waiting for a file to appear for a defined time
+;; or infinitely (it timeout is :infinite)
+;; this code checks every file-wait-chunk-ms milliseconds whether
+;; the file has appeared
+(defn+ wait-for-file (file-name timeout file-wait-chunk-ms)
+  (if (or (erl/== timeout :infinite) (erl/> timeout 0))
+      (if (filelib/is_file file-name)
+	  {:success file-name}
+	  (do (timer/sleep file-wait-chunk-ms)
+	   (wait-for-file file-name (erl/- timeout file-wait-chunk-ms) file-wait-chunk-ms)))
+      {:failure :timeout}))

@@ -11,3 +11,7 @@
 	(:ok              (fmt-success "directory [~s] created" dir))
 	({:error :eexist} (fmt-success "directory [~s] already exists" dir))
 	({:error reason}  (fmt-error "failed to create-dir [~s] with error ~p" dir reason))))
+
+(defn+ wait-for-file (file-name timeout file-wait-chunk-ms)
+  ;; forward call to utility module
+  (flow-utils/wait-for-file file-name timeout file-wait-chunk-ms))

@@ -5,8 +5,8 @@ all: compile build-test
 BEAMFILES = ebin/flow-utils.beam \
 	    ebin/file-mon.beam \
 	    ebin/flow-log.beam \
-	    ebin/task-exec.beam \
-            ebin/tasks-fsys.beam 
+            ebin/tasks-fsys.beam \
+	    ebin/task-exec.beam
 
 
 ebin/%.beam: src/%.jxa
