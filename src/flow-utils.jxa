@@ -5,8 +5,9 @@
 	     timer
 	     io_lib
 	     (erlang :as erl)
-	     (string :as str)
-	     joxa-core))
+	     (string :as str))
+    (use (joxa-core :only (if/3 gensym/0 or/1))))
+
 
 ;; a define+ macro that exports the defined name
 (defmacro+ define+ (name value)
@@ -36,18 +37,16 @@
 
 
 ;; keep waiting for a file to appear for a defined time
+;; or infinitely (it timeout is :infinite)
 ;; this code checks every file-wait-chunk-ms milliseconds whether
 ;; the file has appeared
 (defn+ wait-for-file (file-name timeout file-wait-chunk-ms)
-  (case (erl/> timeout 0)
-        (:true
-	 (case (filelib/is_file file-name)
-	       (:true {:success file-name})
-	       (:false (timer/sleep file-wait-chunk-ms)
-		       (wait-for-file file-name (erl/- timeout file-wait-chunk-ms) file-wait-chunk-ms))))
-	(:false
-	 {:failure :timeout})))
-
+  (if (or (erl/== timeout :infinite) (erl/> timeout 0))
+      (if (filelib/is_file file-name)
+	  {:success file-name}
+	  (do (timer/sleep file-wait-chunk-ms)
+	   (wait-for-file file-name (erl/- timeout file-wait-chunk-ms) file-wait-chunk-ms)))
+      {:failure :timeout}))
 
 
 ;; read in a file that contains a single integer
@@ -68,7 +67,7 @@
 
 ;; use of this macro requires the namespace erlang is required
 (defmacro+ async-send-me (task)
-  (let* (myself (joxa-core/gensym))
+  (let* (myself (gensym))
     `(let* (~myself (erlang/self))
        (erlang/spawn (fn () (erlang/send ~myself ~task))))))
 

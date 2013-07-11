@@ -43,11 +43,13 @@
 
 ;; send an eof request (files are closed)
 (defn+ close-log (pid)
-  (erl/send pid :eof))
+  (erl/send pid :eof)
+  :ok)
 
 ;; send a stop request (files are not closed)
 (defn+ stop-log (pid)
-  (erl/send pid :exit))
+  (erl/send pid :exit)
+  :ok)
 
 ;; construct a logging timestamp
 (defn timestamp ()

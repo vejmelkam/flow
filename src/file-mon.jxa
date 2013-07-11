@@ -1,56 +1,44 @@
+
 (ns file-mon
-    (require file timer io os lists string)
-    (use (erlang :only (send/2 spawn/1 self/0 length/1 ==/2))
-	 (joxa-core :only (-/1 +/1 and/1))
+    (require file timer io os lists string (erlang :as erl))
+    (use (joxa-core :only (and/1 let/2 if/3))
 	 (io_lib :only (format/2))
 	 (flow-utils :only (wait-for-file/3 multicast/2))))
 
 
-;; this is a hack which uses the userland utility fuser to monitor
-;; how many processes have file descriptors open on file-name
-;; when this drops to one it's just us, the file won't grow anymore
-;; then file-in-use-check returns :false, otherwise it returns :true
-;; NOTE: this may be a problem if the writing process is not on this machine, can fuser detect the write?
-;;
-;; when monitoring output files of running processes, an alternate method is used: when .exitcode file appears, the process is done
-;; writing to stdout/stderr files
-(defn+ file-in-use-check (file-name)
-  (let* (output (os/cmd (lists/append "fuser " file-name))
-	 sc-pos (string/chr output 58) ;; $: = 58
-	 numbers (string/sub_string output (+ sc-pos 2))
-	 proc-count (length (string/tokens numbers " ")))
-    (== proc-count 1)))
-
 ;; monitors the open device for new lines, which are sent to a list of processes
-(defn monitor-device (master-pid file-name dev timeout-ms retries-past-close done-func targets)
+(defn monitor-device (file-name dev timeout-ms retries-past-close done-func targets)
   (case (file/read_line dev)
 	({:ok line} (multicast {:line line} targets)
-	            (monitor-device master-pid file-name dev timeout-ms
+	            (monitor-device file-name dev timeout-ms
 				    retries-past-close done-func targets))
-	(:eof (case (done-func)
-		    (:false (timer/sleep timeout-ms) (monitor-device master-pid file-name dev timeout-ms
-								     retries-past-close done-func targets))
-		    (:true
-		     (case (== retries-past-close 0)
-		           (:false (timer/sleep timeout-ms)
-				   (monitor-device master-pid file-name dev timeout-ms
-						   (- retries-past-close 1) done-func targets))
-			   (:true (multicast :eof targets)
-				  {:success (format "file ~p has been closed" [file-name])})))))
-	({:error reason} (send master-pid {:failure reason}))))
+	;; eof is returned when there is no more data to be read in right now
+	(:eof (if (done-func)
+		  ;; if we are done and past all retry attempts, transmit :eof and exit
+		  (if (erl/== retries-past-close 0)
+		      ; no success/failure code is returned
+		      (multicast :eof targets)
+		      (do (timer/sleep timeout-ms)
+			  (monitor-device file-name dev timeout-ms
+					  (erl/- retries-past-close 1) (fn () :true) targets)))
+;		  ;; not done yet, sleep for the given timeout time
+		  (do (timer/sleep timeout-ms)
+		      (monitor-device file-name dev timeout-ms
+				      retries-past-close done-func targets))))
+	;; there has been an error
+	({:error reason} 
+	 (multicast  {:failure (format "failed to watch file ~s with reason ~p" [file-name reason])}
+		     targets))))
 
 
 ;; monitor the file file-name while checking whether writing to the file is considered done
 ;; using done-func and transmitting lines/eof messages to all targets
 ;; when the file is closed, the monitor exits by itself
 (defn+ monitor-file (file-name done-func targets)
-  ;; wait max 4 seconds for the file to appear (basically only filesystem delay)
-  (wait-for-file file-name 4000 200)
-  ;; open the file and keep reading in it while it is in use
-  (case (file/open file-name [:read])
-	({:ok device} 
-	 (let* (myself (self))
-	   {:pid (spawn (fn () (monitor-device myself file-name device 500 2 done-func targets)))}))
-	({:error reason} {:failure reason})))
-
-
+  ;; wait max 4 seconds for the file to appear in case it's visible immediately
+  (case (wait-for-file file-name 4000 200)
+	({:success _f} 
+	 {:pid (erl/spawn (fn () (let ({:ok dev} (file/open file-name [:read]))
+					   (monitor-device file-name dev 500 2 done-func targets)
+					   (file/close dev))))})
+	(failure failure)))

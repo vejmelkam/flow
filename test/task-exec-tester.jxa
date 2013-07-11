@@ -22,8 +22,7 @@
 
 (defn init-logging ()
   (core/let ({:ok dev} (file/open "task-exec-log.info" [:write]))
-      (flow-log/start-log "syslog" [{:stdio (flow-log/INFO)} {:device dev (flow-log/WARN)}])))
-  
+      (flow-log/start-log "syslog" [{:stdio (flow-log/INFO)} {:device dev (flow-log/INFO)}])))
 
 
 (defn+ test ()
@@ -35,7 +34,7 @@
 	    ({:success exit-code}
 	     (io/format "tester: have exit code ~p~n" [exit-code])
 	     (case (monitor-file (get-output-file 1 out-spec) (fn () :true) [(spawn-consumer)])
-		   ({:pid pid} :ok)
+		   ({:pid pid} (io/format "monitor pid is ~p~n" [pid]))
 		   ({:failure reason} (io/format "failed to monitor file with reason ~p~n" [reason]))))
 	    ({:running {pid exit-code-f}}
 	     (io/format "process is running with pid ~p~n" [pid])
