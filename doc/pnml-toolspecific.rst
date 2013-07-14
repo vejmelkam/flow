@@ -1,7 +1,7 @@
 
 
 PNML Elements
-=============
+*************
 
 The PNML format is extensible, every place, transition and arc can have a ''toolspecific'' section.
 The toolspecific section contains joxa code or a simpler variant thereof (constructed via macros).
@@ -13,7 +13,7 @@ Code task
 ---------
 **Example element**
 
-::
+.. code-block:: xml
     <toolspecific>
       <input>
         <variable domain="kb">working-directory</variable>
