@@ -1,5 +1,4 @@
 
-
 PNML Elements
 *************
 
@@ -13,7 +12,8 @@ Graphics elements can be safely ignored.
 
 Example place
 ^^^^^^^^^^^^^
-
+.. code-block:: xml
+    
     <place id="p9">
       <name>
         <text>p9</text>
@@ -30,6 +30,7 @@ Example place
 
 Example transition
 ^^^^^^^^^^^^^^^^^^
+.. code-block:: xml
 
     <transition id="t7_op_1">
       <name>
@@ -50,6 +51,7 @@ Example transition
 
 Example arc
 ^^^^^^^^^^^
+.. code-block:: xml
 
     <arc target="t6" source="p3" id="a33">
       <inscription>
@@ -61,10 +63,10 @@ Example arc
 
 
 
-Example element
-^^^^^^^^^^^^^^^
-
+Example toolspecific element
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 .. code-block:: xml
+
     <toolspecific>
       <input>
         <variable domain="kb">working-directory</variable>
