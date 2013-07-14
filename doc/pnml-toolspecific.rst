@@ -13,29 +13,29 @@ Code task
 ---------
 **Example element**
 
-.. code-block :: xml
-  <toolspecific>
-    <input>
-      <variable domain="kb">working-directory</variable>
-      <variable domain="kb">job-id</variable>
-    </input>
-    <requires>
-      <condition>working-directory-exists</condition>
-    </requires>
-    <code script="joxa">
-      (let* (wd (plan-kb/get "working-directory")
-             ji (plan-kb/get "job-id")
-             tgt (filename/join wd (lists/flatten "wps-exec-" ji)))
-	     (tasks-fsys/create-directory tgt)
-	     (plan-kb/put "wps-exec-dir" tgt))
-    </code>
-    <output>
-      <variable domain="kb">wps-exec-dir</variable>
-    </output>
-    <provides>
-      <condition>wps-execution-directory-exists</condition>
-    </provides>
-  </toolspecific>
+
+    <toolspecific>
+      <input>
+        <variable domain="kb">working-directory</variable>
+        <variable domain="kb">job-id</variable>
+      </input>
+      <requires>
+        <condition>working-directory-exists</condition>
+      </requires>
+      <code script="joxa">
+        (let* (wd (plan-kb/get "working-directory")
+               ji (plan-kb/get "job-id")
+               tgt (filename/join wd (lists/flatten "wps-exec-" ji)))
+                (tasks-fsys/create-directory tgt)
+                (plan-kb/put "wps-exec-dir" tgt))
+      </code>
+      <output>
+        <variable domain="kb">wps-exec-dir</variable>
+      </output>
+      <provides>
+        <condition>wps-execution-directory-exists</condition>
+      </provides>
+    </toolspecific>
 
 
 Verification
