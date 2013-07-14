@@ -54,7 +54,7 @@
 	
 
 (defn construct-transition (elem)
-  "Parse the transition id, input variables, output variables and code snippet."
+  "Parse the transition id and if code is associated, input variables, output variables and code snippet."
   (let* (desc (xml-text/value (jxl/hd (xpath/string "name/text/child::text()" elem)))
 	 id   (attr-value-by-name 'id (xml-elem/attributes elem)))
     (case (find-flow-toolspecifics (xpath/string "toolspecific" elem))
@@ -64,11 +64,10 @@
 
 (defn construct-arc (elem)
   "Given the arc xml element, construct the arc representation"
-  (let* (attr (xml-elem/attributes elem)
-	 id (attr-value-by-name 'id attr)
-	 src (attr-value-by-name 'source attr)
-	 tgt (attr-value-by-name 'target attr))
-    {'arc id src tgt}))
+  (let* (attr (xml-elem/attributes elem))
+    {'arc (attr-value-by-name 'id attr)
+	  (attr-value-by-name 'source attr)
+	  (attr-value-by-name 'target attr)}))
 	 
 
 (defn construct-place (elem)
