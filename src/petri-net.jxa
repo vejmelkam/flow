@@ -1,0 +1,45 @@
+(ns petri-net-rec
+    (use joxa-records))
+
+(defrecord+ places transitions arcs)
+
+
+(ns petri-net
+    (require petri-net-rec
+	     dict
+	     lists
+;	     pn-place
+;	     pn-trans
+	     (erlang :as erl)
+	     (joxa-core :as jxc))
+    (use flow-utils))
+
+
+
+(defn+ get-place-ids (pnr)
+  "Retrieve all place ids."
+  (lists/foreach (fnm1 {'place id _desc} id) (petri-net-rec/places pnr)))
+
+(defn+ get-transition-ids (pnr)
+  "Retrieve all transition ids."
+  (lists/foreach (fnm1 {'transition id _desc _code} id) (petri-net-rec/transitions pnr)))
+
+(defn update-map (node-info map)
+  "Add the mapping id -> pid contained in <node-info> as {id, pid} to dictionary <map>."
+  (jxc/let ({id pid} node-info)
+     (dict/store id pid map)))
+
+(defn make-node (n)
+  "Make a new network node (transition or place)."
+  (case (erl/element 1 n)
+	('place 'ok) ;FIXME
+	('transition 'ok)))
+
+(defn+ build-network (pnr)
+  "Construct the place/transition network structure described by the petri-net-rec <pnr>."
+  (let* (nodes (lists/flatten [(petri-net-rec/places pnr) (petri-net-rec/transitions pnr)])
+	 arcs (petri-net-rec/arcs pnr)
+	 map (lists/foldl (fn (n map) (update-map (make-node n) map)) (dict/new) nodes))
+; FIXME    (lists/foreach (fnm1 {'arc from to} (add-target from to) (add-source to from)) map2)
+    map))
+    

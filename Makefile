@@ -7,6 +7,7 @@ BEAMFILES = ebin/flow-utils.beam \
 	    ebin/flow-log.beam \
             ebin/tasks-fsys.beam \
 	    ebin/task-exec.beam \
+	    ebin/petri-net.beam \
 	    ebin/pnml-parser.beam
 
 

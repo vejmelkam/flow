@@ -18,7 +18,7 @@
 
 
 (ns pnml-parser
-    (require dict io lists 
+    (require dict io lists petri-net-rec
 	     (erlang :as erl)
 	     (xmlElement :as xml-elem)
 	     (xmlAttribute :as xml-attr)
@@ -30,6 +30,7 @@
 
 
 (defn attr-value-by-name (name attrs)
+  "Retrieve the value of the attribute <name> from the list of attribute records <attrs>."
   (xml-attr/value 
    (jxl/hd
     (lists/dropwhile (fn (attr) (erl/not (erl/== (xml-attr/name attr) name))) attrs))))
@@ -58,8 +59,8 @@
   (let* (desc (xml-text/value (jxl/hd (xpath/string "name/text/child::text()" elem)))
 	 id   (attr-value-by-name 'id (xml-elem/attributes elem)))
     (case (find-flow-toolspecifics (xpath/string "toolspecific" elem))
-	  ([] {:transition id desc []})
-	  ([xml-ts] {:transition id desc (parse-transition-code xml-ts)}))))
+	  ([] {'transition id desc []})
+	  ([xml-ts] {'transition id desc (parse-transition-code xml-ts)}))))
 
 
 (defn construct-arc (elem)
@@ -78,12 +79,12 @@
 
 
 (defn+ parse (file-name)
-  "Parse the definition of the petri net."
+  "Parse the definition of the petri net in PNML with our extra markup."
   (jxc/let ({xml-data _rest} (xml/file file-name))
      (let* (places (lists/map construct-place/1 (xpath/string "/pnml/net/place" xml-data))
 	    trans (lists/map construct-transition/1 (xpath/string "/pnml/net/transition" xml-data))
 	    arcs (lists/map construct-arc/1 (xpath/string "/pnml/net/arc" xml-data)))
-       {'ptnet places trans arcs})))
+       (petri-net-rec/make places trans arcs))))
 
 
 (defn+ test ()

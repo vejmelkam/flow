@@ -10,14 +10,10 @@
 	     (joxa-core :as core)
 	     (erlang :as erl :joxify))
     (use (flow-utils :only (fmt-error/2 fmt-success/2 read-int-from-file/1
-			    wait-for-file/3 async-send-me/1 async-send-to/2))))
+			    wait-for-file/3 async-send-me/1 async-send-to/2
+			    fnm1/2))))
 
 
-;; define a macro that matches an arbitrary structure to
-;; a single function argument
-(defmacro fnm1 (args body)
-  (let* (arg (core/gensym))
-    `(fn (~arg) (core/let (~args ~arg) ~body))))
 
 ;; make command string given an output specification
 (defn+ make-cmd-str (tid cmd output-spec)
@@ -69,23 +65,23 @@
 ;; and waiting for the exit code
 (defn monitor-process (in-dir tid os-pid)
   (receive
-   (:kill-9
+   ('kill-9
     (os/cmd (iol/format "kill -9 ~p" [os-pid]))
     (monitor-process in-dir tid os-pid))
    ;; the process exited, capture status
-   ({:exited {:success exit-code-file}}
+   ({'exited {'success exit-code-file}}
     (let* (exit-code (read-int-from-file exit-code-file))
       (fmt-success "~s: exited with code ~p" tid exit-code)))
-   ({:exited {:failure reason}}
+   ({'exited {'failure reason}}
     ; kill the rogue process
     (os/cmd (iol/format "kill -9 ~p" [os-pid]))
     (fmt-error "~s: failed with reason ~p, process ~p killed" tid reason os-pid))
-   ({:have-pid {:failure :timeout}}
+   ({'have-pid {'failure 'timeout}}
     (fmt-error "~s: pid not acquired within timeout~n" tid))
    ;; the pid file was created
-   ({:have-pid {:success pid-file}}
+   ({'have-pid {'success pid-file}}
     (case (read-int-from-file pid-file)
-	  (:invalid 
+	  ('invalid 
 	   (fmt-error "~s: unable to obtain pid from file ~s" tid pid-file))
 	  (os-pid-2 (monitor-process in-dir tid os-pid-2))))
    ;; we don't understand this message, notify
@@ -101,13 +97,13 @@
     (make-run-script command tid output-spec fqn)
     ;; spawn a process that waits for the pid and exit code files to appear
     ;; with given timeouts
-    (let* (port-id (erl/open-port {:spawn fqn} [{:cd in-dir}])
+    (let* (port-id (erl/open-port {'spawn fqn} [{'cd in-dir}])
 	   myself  (erl/self)
-           pid     (async-send-me {:task-done (erl/self) (monitor-process in-dir tid :undefined)}))
+           pid     (async-send-me {'task-done (erl/self) (monitor-process in-dir tid 'undefined)}))
 	;; construct watchers in separate threads
-	(async-send-to pid {:exited (wait-for-file exit-code-f exec-timeout 500)})
-	(async-send-to pid {:have-pid (wait-for-file pid-f 5000 500)})
-	{:running {pid exit-code-f}})))
+	(async-send-to pid {'exited (wait-for-file exit-code-f exec-timeout 500)})
+	(async-send-to pid {'have-pid (wait-for-file pid-f 5000 500)})
+	{'running {pid exit-code-f}})))
 
 
 ;; execute a process denoted tid with a given timeout in a given directory
@@ -119,26 +115,28 @@
   ;; check if the command has already been run (exitcode file exists)
   (core/let ([pid-f exit-code-f] (make-proc-names in-dir tid [".pid" ".exitcode"]))
     (case (read-int-from-file exit-code-f)
-	  (:invalid 
+	  ('invalid 
 	   (log/info log-pid "~s: no exit code found, pid will be checked" tid)
 	   (case (read-int-from-file pid-f)
-		 (:invalid 
+		 ('invalid 
 		  (log/info log-pid "~s: no pid file found process ~p must be started" tid command)
 		  (do-execute tid command output-spec in-dir exec-timeout log-pid))
 		 (os-pid
 		  (log/info log-pid "~s: found pid file, assuming process ~p still active" tid os-pid)
-		  (let* (pid (async-send-me {:task-done (erl/self) (monitor-process in-dir tid os-pid)}))
+		  (let* (pid (async-send-me {'task-done (erl/self) (monitor-process in-dir tid os-pid)}))
 		    ;; we only spawn the exit watcher
-		    (async-send-to pid {:exited (wait-for-file exit-code-f exec-timeout 500)})
-		    {:running {pid exit-code-f}}))))
+		    (async-send-to pid {'exited (wait-for-file exit-code-f exec-timeout 500)})
+		    {'running {pid exit-code-f}}))))
 	  (exit-code
 	   ;; just return the exit code we already obtained
 	   (log/info log-pid "~s: exit code ~p found, returning immediately" tid exit-code)
-	   {:success exit-code}))))
+	   {'success exit-code}))))
 
 
 (defn+ make-std-output-spec (in-dir tid)
-  [{1 (make-proc-file-name in-dir tid ".stdout")} {2 (make-proc-file-name in-dir tid ".stderr")}])
+  "Construct a standard output mapping, where fd 1 is sent to <tid>.stdout and fd 2 is sent to <tid>.stderr"
+  [{1 (make-proc-file-name in-dir tid ".stdout")}
+   {2 (make-proc-file-name in-dir tid ".stderr")}])
 
 (defn+ get-output-file (for-fd output-spec)
   (case output-spec
@@ -150,4 +148,4 @@
 ;; more sophisticated clients should handle this message themselves
 (defn+ wait-for-completion (pid)
   (receive
-   ({:task-done pid result} result)))
+   ({'task-done pid result} result)))
